@@ -27,8 +27,8 @@ open TestData
 [<Tests>]
 let tests =
     testList "Public Key Tests" [
-        test "Parse OpenSSH Public Key File" {
-            let publicKey = PublicKey.ParseSshPublicKey testSshKey
+        test "Parse OpenSSH RSA Public Key File" {
+            let publicKey = PublicKey.ParseSshPublicKey testRsaSshKey :?> RsaPublicKey
             Expect.equal
                 publicKey.Algorithm
                 "ssh-rsa"
@@ -47,8 +47,24 @@ let tests =
                 "user@domain.local"
                 "Incorrect comment"
         }
+        test "Parse OpenSSH Ed25519 Public Key File" {
+            let publicKey = PublicKey.ParseSshPublicKey testEd25519SshKey :?> Ed25519PublicKey
+            Expect.equal
+                publicKey.Algorithm
+                "ssh-ed25519"
+                "Incorrect algorithm"
+            Expect.equal
+                (publicKey.Key |> Convert.ToHexString)
+                "7740D78D35F10DCD2ECA9DBEBF25D088E3565A17D792622FB72F752C9681F293"
+                $"Incorrect modulus"
+            Expect.isNotNull publicKey.Comment "OpenSSH key should have comment."
+            Expect.equal
+                publicKey.Comment
+                "user@domain.local"
+                "Incorrect comment"
+        }
         test "Parse OpenSSH Public Key - Long Comment" {
-            let publicKey = testSshKeyWithLongComment |> PublicKey.ParseSshPublicKey
+            let publicKey = testSshKeyWithLongComment |> PublicKey.ParseSshPublicKey :?> RsaPublicKey
             Expect.equal
                 (publicKey.Exponent |> Convert.ToHexString)
                 "010001"
@@ -85,6 +101,19 @@ let tests =
                 "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCcv+po7iuukpA7zYKWcY5oDE00ko4Fw+sYWGG7qgUeV1IzmftEPrwE+WOlOmI7QpWb0ebwbfokDBK+wO7L9cSVPfp/AW9GJxwcEnNT9uPTFKJRdoGe/7WB3bbVWZCOq/0cyVcJ/OoowhPHIC3VBpJKHlfE8g8IsV/rGiCwt48QZiI6GuXGDFObgkpS3yxTZOrU4HgNZG7aeAEsm34OEO+m2prJzIYETAEQIyt5XFvY426DYHYRtXLkaKGYiKGmUnj5C92CC+KZgu3VNWBWnzSrlGqSoTHB+SSMs/0/zYtMKq9plRkwkCV53tGo4RQ777IEdjjZp7HzqnKkEHDylzN/"
                 "Generated SSH key did not match expected."
         }
+        test "ED25519 to OpenSSH" {
+            let exponent = Convert.FromHexString "010001"
+            let modulus = Convert.FromHexString "9CBFEA68EE2BAE92903BCD8296718E680C4D34928E05C3EB185861BBAA051E57523399FB443EBC04F963A53A623B42959BD1E6F06DFA240C12BEC0EECBF5C4953DFA7F016F46271C1C127353F6E3D314A25176819EFFB581DDB6D559908EABFD1CC95709FCEA28C213C7202DD506924A1E57C4F20F08B15FEB1A20B0B78F1066223A1AE5C60C539B824A52DF2C5364EAD4E0780D646EDA78012C9B7E0E10EFA6DA9AC9CC86044C0110232B795C5BD8E36E83607611B572E468A19888A1A65278F90BDD820BE29982EDD53560569F34AB946A92A131C1F9248CB3FD3FCD8B4C2AAF69951930902579DED1A8E1143BEFB2047638D9A7B1F3AA72A41070F297337F"
+            let parameters = RSAParameters(Exponent=exponent, Modulus=modulus)
+            use rsa = RSA.Create(parameters)
+            let key = Convert.FromHexString "89a429c70941937ebeb071b8c5def2aadd41bfc87f7098b40283b77b2c5e7a5f"
+            let publicKey = Ed25519PublicKey(key)
+            let sshKey = publicKey |> PublicKey.ToSshPublicKey
+            Expect.equal
+                sshKey
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIImkKccJQZN+vrBxuMXe8qrdQb/If3CYtAKDt3ssXnpf"
+                "Generated SSH key did not match expected."
+        }
         test "RSA to OpenSSH cert-authority line" {
             let publicKey =
                 let exponent = Convert.FromHexString "010001"
@@ -109,7 +138,7 @@ let tests =
                 "Generated SSH key did not match expected."
         }
         test "OpenSSH to RSA" {
-            let publicKey = PublicKey.ParseSshPublicKey testSshKey
+            let publicKey = PublicKey.ParseSshPublicKey testRsaSshKey
             use rsa = publicKey |> PublicKey.ToRsaPublicKey
             let rsaPubKey = rsa.ExportParameters(false)
             Expect.equal
@@ -147,9 +176,9 @@ let tests =
                 (set.Add(differentPubKey))
                 "Different pubKey should be newly added"
         }
-        test "TryParse SSH Public Key - Success" {
+        test "TryParse SSH RSA Public Key - Success" {
             let mutable publicKey : PublicKey = null
-            let success = PublicKey.TryParseSshPublicKey(testSshKey, &publicKey)
+            let success = PublicKey.TryParseSshPublicKey(testRsaSshKey, &publicKey)
             Expect.isTrue success "Should successfully parse valid SSH key"
             Expect.isNotNull publicKey "Public key should not be null"
             Expect.equal publicKey.Algorithm "ssh-rsa" "Incorrect algorithm"
@@ -228,14 +257,14 @@ let tests =
         test "Parse SSH Public Key - Algorithm validation detects mismatch" {
             // Create a malformed key where the algorithm prefix doesn't match the embedded data
             // This is a real ssh-rsa key, but we'll modify the prefix
-            let malformedKey = testSshKey.Replace("ssh-rsa", "ssh-ed25519")
+            let malformedKey = testRsaSshKey.Replace("ssh-rsa", "ssh-ed25519")
             
             Expect.throws
                 (fun () -> PublicKey.ParseSshPublicKey(malformedKey) |> ignore)
                 "Should throw FormatException for algorithm mismatch"
         }
         test "TryParse detects algorithm mismatch" {
-            let malformedKey = testSshKey.Replace("ssh-rsa", "ssh-ed25519")
+            let malformedKey = testRsaSshKey.Replace("ssh-rsa", "ssh-ed25519")
             let mutable publicKey : PublicKey = null
             let success = PublicKey.TryParseSshPublicKey(malformedKey, &publicKey)
             Expect.isFalse success "Should fail to parse key with algorithm mismatch"

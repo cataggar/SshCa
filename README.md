@@ -10,10 +10,11 @@ Use SSH public key and and CA certificates to sign SSH public keys. It can be us
 See the [SshCATests](SshCATests) project for examples.
 
 ### Features
-* Read OpenSSH public keys and convert them to RSA public keys
-* Read RSA public keys from a PEM file for use with signing.
-* Write RSA public keys as OpenSSH public keys
+* Parse OpenSSH public keys in `ssh-rsa` (RSA) or `ssh-ed25519` (Edwards Curve 25519) format.
 * Sign OpenSSH public keys with an RSA implementation such as `System.Security.Cryptography.RSA` or the one returned by `Azure.Security.KeyVault.Keys.Cryptography.CryptographyClient.CreateRSA`.
+* Convert `ssh-rsa` OpenSSH keys to RSA public keys.
+* Read RSA public keys from a PEM file for use with signing.
+* Write RSA public keys as OpenSSH public keys.
 * Safe parsing with `TryParse*` methods that don't throw exceptions
 * Helper methods for adding common certificate extensions and critical options
 
@@ -21,15 +22,14 @@ See the [SshCATests](SshCATests) project for examples.
 
 * Conversion between RSA and OpenSSH public keys always formats them as `ssh-rsa`.
 * Certificates need to be signed with SHA-512 as the signatures are always formatted as `rsa-sha2-512`.
-* Generated certificate algorithm is always `rsa-sha2-512-cert-v01@openssh.com`.
-* Only `ssh-rsa` algorithm is currently supported. Parsing validates that the algorithm matches between the key line and embedded data.
-
+* The `ssh-rsa` and `ssh-ed25519` algorithms are currently supported. Parsing validates that the algorithm matches between the key line and embedded data.
+* When signing `ssh-rsa` public keys, the generated certificate algorithm is always `rsa-sha2-512-cert-v01@openssh.com`.
+* When signing `ssh-ed25519` public keys, the generated certificate algorithm is always `ssh-ed25519-cert-v01@openssh.com`.
+* Regardless of the type of public key being signed, they are always signed with an RSA CA key pair at this time.
 
 The goal is to allow external service to sign SSH keys, so this gives some flexibility in what RSA implementation is
 used for signing (dotnet RSA, OpenSSL, external call to Azure Key Vault or AWS KMS, maybe you have an HSM). Whichever
 implementation is used, it should be signed with an RSA private key using SHA-512.
-
-Support for signing elliptic curve keys is possible in OpenSSH, but not implemented at this time.
 
 ### Usage
 
