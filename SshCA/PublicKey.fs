@@ -139,6 +139,52 @@ type RsaPublicKey(exponent:byte array, modulus:byte array, comment:string) =
             (modulus :> System.Collections.IStructuralEquatable).GetHashCode(System.Collections.Generic.EqualityComparer<byte>.Default),
             comment)
 
+type Ed25519PublicKey(key:byte array, comment:string) =
+    inherit PublicKey(Ed25519PublicKey.SshEd25519, comment)
+    /// Represents the identifier for Ed25519 algorithm in the context
+    /// of SSH public key operations. The value is a literal string
+    /// "ssh-ed25519", which is used to specify the Edwards Curve 25519
+    /// with SHA-512 algorithm in SSH key exchanges and related operations.
+    static member SshEd25519 = "ssh-ed25519"
+
+    /// Represents the exponent value of a public ED25519 key as a byte array.
+    ///
+    /// The key is a critical component of the Ed25519 public key used
+    /// in cryptographic algorithms. This property provides read-only
+    /// access to the exponent value stored in the `PublicKey` instance.
+    member val Key: byte array = key with get
+
+    /// Represents an SSH public key with Ed25519 algorithm and associated parameters.
+    ///
+    /// Properties:
+    /// - Algorithm: Represents the type of the algorithm (e.g., "ssh-ed25519").
+    /// - Key: The public key of the Ed25519 key.
+    /// - Comment: An optional comment associated with the public key.
+    new(key) = Ed25519PublicKey(key, null)
+
+    override this.WritePublicKeyComponents (sshBuf:SshBuffer) =
+        this.Key |> sshBuf.WriteSshData
+
+    interface IEquatable<Ed25519PublicKey> with
+        member this.Equals (other: Ed25519PublicKey) =
+            this.Algorithm = other.Algorithm &&
+            System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals(this.Key, other.Key) &&
+            this.Comment = other.Comment
+
+    override this.Equals(other) =
+        if Object.ReferenceEquals(this,other) then true
+        else
+            match other with
+            | :? Ed25519PublicKey as otherPubKey ->
+                (this :> IEquatable<Ed25519PublicKey>).Equals otherPubKey
+            | _ -> false
+
+    override this.GetHashCode() =
+        HashCode.Combine(
+            Ed25519PublicKey.SshEd25519,
+            (key :> System.Collections.IStructuralEquatable).GetHashCode(System.Collections.Generic.EqualityComparer<byte>.Default),
+            comment)
+
 type PublicKey with
     /// Parses an SSH public key from its string representation.
     ///
@@ -165,7 +211,7 @@ type PublicKey with
     ///
     /// Assumptions:
     /// - The key string follows the standard SSH public key format.
-    static member ParseSshPublicKey (keyLine:string) =
+    static member ParseSshPublicKey (keyLine:string) : PublicKey =
         if String.IsNullOrEmpty keyLine then
             invalidArg "keyLine" "Empty OpenSSH public key passed."
         // Plain SSH key line is ~400 characters, so 10,000 is a sane maximum.
@@ -185,15 +231,21 @@ type PublicKey with
                 raise (FormatException (String.Format("Algorithm mismatch: key line specifies '{0}' but embedded data contains '{1}'", algName, alg)))
             
             // Validate that we support this algorithm
-            if alg <> RsaPublicKey.SshRsa then
-                raise (FormatException (String.Format("Unsupported algorithm '{0}'. Only '{1}' is currently supported.", alg, RsaPublicKey.SshRsa)))
-            
-            let e = sshBuf.ReadSshData()
-            let n = sshBuf.ReadSshData()
-            if sections.Length > 2 then
-                RsaPublicKey(e, n, String.Join(' ', sections[2..])) // key comment.
+            if alg = RsaPublicKey.SshRsa then
+                let e = sshBuf.ReadSshData()
+                let n = sshBuf.ReadSshData()
+                if sections.Length > 2 then
+                    RsaPublicKey(e, n, String.Join(' ', sections[2..])) // key comment.
+                else
+                    RsaPublicKey(e, n)
+            elif alg = Ed25519PublicKey.SshEd25519 then
+                let k = sshBuf.ReadSshData()
+                if sections.Length > 2 then
+                    Ed25519PublicKey(k, String.Join(' ', sections[2..])) // key comment.
+                else
+                    Ed25519PublicKey(k)
             else
-                RsaPublicKey(e, n)
+                raise (FormatException (String.Format("Unsupported algorithm '{0}'. Only '{1} and {2}' are currently supported.", alg, RsaPublicKey.SshRsa, Ed25519PublicKey.SshEd25519)))
         else
             raise (FormatException "Malformed OpenSSH public key line.")
 

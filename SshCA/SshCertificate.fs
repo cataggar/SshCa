@@ -186,8 +186,10 @@ module private CertificateSigning =
     /// User certificate is 1u: https://github.com/openssh/openssh-portable/blob/edc601707b583a2c900e49621e048c26574edd3a/ssh2.h#L179
     let SSH2_CERT_TYPE_USER = 1u
     
-    /// Certificate signing algorithm is SHA-512.
+    /// Certificate signing algorithm is SHA-512 and signing an RSA public key.
     let RSA_SHA_512_CERT_ALG = "rsa-sha2-512-cert-v01@openssh.com"
+    /// Certificate is signing an ED25519 public key. 
+    let ED25519_CERT_ALG = "ssh-ed25519-cert-v01@openssh.com"
 
     /// Writes a sequence of strings to a new buffer and returns the data.
     let stringsToBuffer (s:string seq) =
@@ -208,7 +210,12 @@ module private CertificateSigning =
         // https://www.ietf.org/proceedings/122/slides/slides-122-sshm-openssh-certificate-format-00.pdf
         let certMs = new MemoryStream()
         let certSshBuf = SshBuffer(certMs)
-        RSA_SHA_512_CERT_ALG |> certSshBuf.WriteSshString
+        if certInfo.PublicKeyToSign.Algorithm = RsaPublicKey.SshRsa then
+            RSA_SHA_512_CERT_ALG |> certSshBuf.WriteSshString
+        elif certInfo.PublicKeyToSign.Algorithm = Ed25519PublicKey.SshEd25519 then
+            ED25519_CERT_ALG |> certSshBuf.WriteSshString
+        else
+            invalidOp $"Unsupported public key algorithm {certInfo.PublicKeyToSign.Algorithm}"
         certInfo.Nonce |> certSshBuf.WriteSshData
         certInfo.PublicKeyToSign.WritePublicKeyComponents certSshBuf
         certInfo.Serial |> certSshBuf.WriteSshData
@@ -277,10 +284,17 @@ type CertificateAuthority(signData:Func<Stream, byte array>) =
             nullArg "certInfo"
         let certBytes = certInfo |> this.Sign
         let b64Cert = certBytes |> Convert.ToBase64String
+        let alg =
+            if certInfo.PublicKeyToSign.Algorithm = RsaPublicKey.SshRsa then
+                CertificateSigning.RSA_SHA_512_CERT_ALG
+            elif certInfo.PublicKeyToSign.Algorithm = Ed25519PublicKey.SshEd25519 then
+                CertificateSigning.ED25519_CERT_ALG
+            else
+                invalidOp $"Unsupported public key algorithm {certInfo.PublicKeyToSign.Algorithm}"
         if String.IsNullOrWhiteSpace comment then
-            String.Format("{0} {1}", CertificateSigning.RSA_SHA_512_CERT_ALG, b64Cert)
+            String.Format("{0} {1}", alg, b64Cert)
         else
-            String.Format("{0} {1} {2}", CertificateSigning.RSA_SHA_512_CERT_ALG, b64Cert, comment)
+            String.Format("{0} {1} {2}", alg, b64Cert, comment)
 
 [<Sealed>]
 type CertificateAuthorityAsync(signDataAsync:Func<Stream, System.Threading.CancellationToken, System.Threading.Tasks.Task<byte array>>) =
