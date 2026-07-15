@@ -1,190 +1,235 @@
-SshCA
-=====
+# SshCA
 
-[![Build and Test](https://github.com/ninjarobot/SshCa/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/ninjarobot/SshCa/actions/workflows/build-and-test.yml)
-[![SshCa on Nuget](https://img.shields.io/nuget/v/SshCA)](https://www.nuget.org/packages/SshCA/)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ninjarobot/SshCa)
+[![Zig build and test](https://github.com/cataggar/SshCa/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/cataggar/SshCa/actions/workflows/build-and-test.yml)
 
-Use SSH public key and and CA certificates to sign SSH public keys. It can be used to read and write SSH public keys, convert between dotnet RSA public keys and the OpenSSH format, and to sign OpenSSH public keys in the format used by OpenSSH.
+SshCA is a Zig 0.16 OpenSSH user certificate authority backed by a
+non-exportable Azure Key Vault RSA key. It issues short-lived RSA or Ed25519
+user certificates without loading CA private-key material into the process or
+copying it to SSH servers.
 
-See the [SshCATests](SshCATests) project for examples.
+## Build
 
-### Features
-* Parse OpenSSH public keys in `ssh-rsa` (RSA) or `ssh-ed25519` (Edwards Curve 25519) format.
-* Sign OpenSSH public keys with an RSA implementation such as `System.Security.Cryptography.RSA` or the one returned by `Azure.Security.KeyVault.Keys.Cryptography.CryptographyClient.CreateRSA`.
-* Convert `ssh-rsa` OpenSSH keys to RSA public keys.
-* Read RSA public keys from a PEM file for use with signing.
-* Write RSA public keys as OpenSSH public keys.
-* Safe parsing with `TryParse*` methods that don't throw exceptions
-* Helper methods for adding common certificate extensions and critical options
+Install Zig 0.16.0, OpenSSL development files, and `pkg-config`, then run:
 
-### Important Information
-
-* Conversion between RSA and OpenSSH public keys always formats them as `ssh-rsa`.
-* Certificates need to be signed with SHA-512 as the signatures are always formatted as `rsa-sha2-512`.
-* The `ssh-rsa` and `ssh-ed25519` algorithms are currently supported. Parsing validates that the algorithm matches between the key line and embedded data.
-* When signing `ssh-rsa` public keys, the generated certificate algorithm is always `rsa-sha2-512-cert-v01@openssh.com`.
-* When signing `ssh-ed25519` public keys, the generated certificate algorithm is always `ssh-ed25519-cert-v01@openssh.com`.
-* Regardless of the type of public key being signed, they are always signed with an RSA CA key pair at this time.
-
-The goal is to allow external service to sign SSH keys, so this gives some flexibility in what RSA implementation is
-used for signing (dotnet RSA, OpenSSL, external call to Azure Key Vault or AWS KMS, maybe you have an HSM). Whichever
-implementation is used, it should be signed with an RSA private key using SHA-512.
-
-### Usage
-
-This example uses an RSA key in Azure Key Vault to sign an SSH public key.
-```csharp
-using SshCA;
-using System.IO;
-using Azure.Security.KeyVault.Keys;
-using Azure.Security.KeyVault.Keys.Cryptography;
-using System.Security.Cryptography;
-
-// Read your existing SSH public key
-var mySshPubKey =
-    File.ReadAllText(
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".ssh",
-            "id_rsa.pub"
-        )
-    );
-var pubKey = PublicKey.ParseSshPublicKey(mySshPubKey);
-
-// Get the CA public key from Azure Key Vault
-var cred = new Azure.Identity.DefaultAzureCredential();
-var keyClient = new KeyClient(new Uri("https://mykeyvault.vault.azure.net"), cred);
-var caRsaPubKey = keyClient.GetKey("ssh-signing-key");
-
-// Convert the CA public key to OpenSSH format.
-SshCA.PublicKey caPubKey = null;
-string caPubKeySsh = null;
-using (var rsa = caRsaPubKey.Value.Key.ToRSA()) {
-    var caPubKeyPem = rsa.ExportRSAPublicKeyPem();
-    caPubKey = SshCA.PublicKey.ParseRsaPublicKeyPem(caPubKeyPem);
-    caPubKeySsh = SshCA.PublicKey.ToSshPublicKey(caPubKey);
-}
-// Note: the OpenSSH formatted key `caPubKeySsh` should be added to a file and
-// that file's path set in the TrustedUserCAKeys in your sshd_config. Or you can
-// generate a cert-authority line to add to an individual authorized_keys file.
-
-var certAuthLine = PublicKey.ToSshCertAuthority(caPubKey);
-
-// Create certificate information. The key_id is going to show in the SSH logs when you use this certificate.
-var certInfo = new CertificateInfo("my-account@linux-server", pubKey, caPubKey);
-certInfo.ValidAfter = DateTimeOffset.Now;
-certInfo.ValidBefore = certInfo.ValidAfter.AddHours(1); // This signature is only good for an hour.
-certInfo.Principals = new List<string>() {"linuxuser"}; // Whatever user(s) you can login as.
-
-// Add extensions using helper methods
-certInfo.AddPermitPty();              // Required for interactive shells
-certInfo.AddPermitAgentForwarding();  // Allow ssh-agent forwarding
-certInfo.AddPermitPortForwarding();   // Allow port forwarding
-// Or use AddAllPermitExtensions() to add all common extensions at once
-
-// Sign it using the CA private key. This signing happens in the Key Vault itself.
-var cryptoClient = new CryptographyClient(new Uri("https://mykeyvault.vault.azure.net/keys/ssh-signing-key"), cred);
-
-String signedCert = null;
-using(var rsa = cryptoClient.CreateRSA()) {
-    // Certificates must be signed with SHA-512.
-    var certAuth = new CertificateAuthority(ms => rsa.SignData(ms, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1));
-    var signedCert = certAuth.SignAndSerialize(certInfo, "comment-such-as:my-account@linux-server");    
-}
-
-// Write it out and it's ready to use.
-File.WriteAllText(
-    Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".ssh",
-        "id_rsa-cert.pub"
-    ),
-    signedCert
-);
+```sh
+zig build
+zig build test
 ```
 
-### Safe Parsing with TryParse Methods
+The CLI is written to:
 
-For scenarios where you want to handle parse failures gracefully without exceptions, use the `TryParse*` methods:
-
-```csharp
-using SshCA;
-
-// Safe parsing of SSH public key
-PublicKey pubKey;
-if (PublicKey.TryParseSshPublicKey(sshKeyString, out pubKey))
-{
-    // Successfully parsed
-    Console.WriteLine($"Algorithm: {pubKey.Algorithm}");
-}
-else
-{
-    // Parsing failed - invalid format, null input, etc.
-    Console.WriteLine("Failed to parse SSH public key");
-}
-
-// Safe parsing of PEM format
-PublicKey pemPubKey;
-if (PublicKey.TryParseRsaPublicKeyPem(pemString, out pemPubKey))
-{
-    // Successfully parsed
-    var sshKey = PublicKey.ToSshPublicKey(pemPubKey);
-}
-
-// Safe parsing with a comment
-PublicKey pemPubKeyWithComment;
-if (PublicKey.TryParseRsaPublicKeyPem(pemString, "my-key-comment", out pemPubKeyWithComment))
-{
-    Console.WriteLine($"Comment: {pemPubKeyWithComment.Comment}");
-}
+```text
+zig-out/bin/sshca
 ```
 
-The `TryParse*` methods return `false` and set the out parameter to `null` for any of these conditions:
-- Null or empty input
-- Invalid base64 encoding
-- Malformed key data
-- Oversized input (>10,000 characters for SSH keys)
-- Invalid PEM format
+## Azure authentication
 
-### Adding Extensions and Critical Options
+The CLI uses `DefaultAzureCredential`, supporting environment credentials,
+workload identity, managed identity, and Azure CLI authentication.
 
-The `CertificateInfo` class provides helper methods to easily add common extensions and critical options:
+For local development:
 
-```csharp
-using SshCA;
-
-var certInfo = new CertificateInfo("user@host", publicKey, caPublicKey);
-
-// Add individual extensions
-certInfo.AddPermitPty();              // Allow pseudo-terminal allocation (required for shells)
-certInfo.AddPermitAgentForwarding();  // Allow ssh-agent forwarding
-certInfo.AddPermitPortForwarding();   // Allow port forwarding
-certInfo.AddPermitX11Forwarding();    // Allow X11 forwarding
-certInfo.AddPermitUserRc();           // Allow execution of ~/.ssh/rc
-
-// Or add all common extensions at once
-certInfo.AddAllPermitExtensions();
-
-// Add custom extensions
-certInfo.AddExtension("my-custom-extension", "optional-data");
-
-// Add critical options
-certInfo.AddForceCommand("/usr/bin/restricted-shell");  // Force a specific command
-certInfo.AddSourceAddress("192.168.1.0/24,10.0.0.0/8"); // Restrict source addresses
-
-// Add custom critical options
-certInfo.AddCriticalOption("my-option", "value");
+```sh
+az login
+az account set --subscription SUBSCRIPTION_ID
+az account show --query '{name:name,id:id}' --output table
+export SSHCA_AZURE_CREDENTIAL=azure-cli
 ```
 
-**Available Extension Helpers:**
-- `AddPermitPty()` - Required for interactive shells
-- `AddPermitAgentForwarding()` - Allow SSH agent forwarding
-- `AddPermitPortForwarding()` - Allow port forwarding  
-- `AddPermitX11Forwarding()` - Allow X11 forwarding
-- `AddPermitUserRc()` - Allow execution of ~/.ssh/rc
-- `AddAllPermitExtensions()` - Adds all of the above
+The credential mode defaults to `default`, which uses
+`DefaultAzureCredential`. Set it to `azure-cli` only for an existing Azure CLI
+session, including the protected live-test workflow. Do not pass tokens or
+client secrets on the `sshca` command line.
 
-**Available Critical Option Helpers:**
-- `AddForceCommand(command)` - Force execution of a specific command
-- `AddSourceAddress(cidrList)` - Restrict valid source addresses (comma-separated CIDR blocks)
+The examples use the public Azure cloud. Select `--cloud government` or
+`--cloud china` for sovereign clouds; this changes both the trusted Key Vault
+DNS suffix and token scope. When using Azure CLI credentials, select the
+matching CLI cloud before signing in:
+
+```sh
+az cloud set --name AzureUSGovernment # --cloud government
+az cloud set --name AzureChinaCloud    # --cloud china
+az login
+```
+
+## Provision the CA key
+
+The provisioning identity needs key create/read permissions, such as
+`Key Vault Crypto Officer` during initial setup.
+
+```sh
+sshca ca ensure \
+  --vault-url "https://example.vault.azure.net" \
+  --name ssh-user-ca
+```
+
+Defaults:
+
+- non-exportable RSA
+- 3072 bits
+- only `sign` and `verify` operations
+- enabled key
+
+Supported sizes are 2048, 3072, and 4096. Use `--hsm` only with a Premium
+Key Vault:
+
+```sh
+sshca ca ensure \
+  --vault-url "https://example.vault.azure.net" \
+  --name ssh-user-ca \
+  --bits 4096 \
+  --hsm
+```
+
+`ensure` reuses a compatible existing key. It creates a version only after a
+404 response. `ca rotate` is the only command that deliberately creates a new
+version.
+
+## Configure server trust
+
+Export an explicit version:
+
+```sh
+sshca ca public-key \
+  --vault-url "https://example.vault.azure.net" \
+  --name ssh-user-ca \
+  --version KEY_VERSION \
+  > trusted-user-ca-keys
+```
+
+Install that public file on each server and configure:
+
+```text
+TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys
+```
+
+The plain `ca public-key` output is appropriate for `TrustedUserCAKeys`.
+`--cert-authority` instead emits the marker used in an individual
+`authorized_keys` entry.
+
+See [docs/server-trust.md](docs/server-trust.md) for ownership, permissions,
+principals, safe reload, and client configuration.
+
+## Issue a certificate
+
+Use the exact version printed by `ca ensure`:
+
+```sh
+sshca sign \
+  --vault-url "https://example.vault.azure.net" \
+  --name ssh-user-ca \
+  --version KEY_VERSION \
+  --subject-key ~/.ssh/id_ed25519.pub \
+  --key-id alice@example \
+  --principal alice
+```
+
+The default TTL is one hour, with a maximum of eight hours. The default output
+is `~/.ssh/id_ed25519-cert.pub`, which OpenSSH discovers next to the matching
+private key:
+
+```sh
+ssh -i ~/.ssh/id_ed25519 alice@server
+```
+
+The active version can also be supplied through:
+
+```sh
+export SSHCA_ACTIVE_KEY_VERSION=KEY_VERSION
+```
+
+`--latest` is development-only. Production issuance must pin an explicit
+version so the embedded CA public key and Key Vault signing operation always
+refer to the same key version.
+
+Useful restrictions and extensions:
+
+```text
+--ttl SECONDS
+--principal NAME                 repeatable
+--profile interactive|none
+--force-command COMMAND
+--source-address CIDR[,CIDR...]
+--permit-agent-forwarding
+--permit-port-forwarding
+--permit-pty
+--permit-user-rc
+--permit-x11-forwarding
+--comment TEXT
+```
+
+Source-address CIDRs must use canonical network addresses with zero host bits.
+
+## Managed identity and production issuance
+
+An administrative operator may use `ca ensure` and `ca rotate`. A production
+issuer should use a separate managed or workload identity with a custom role
+containing only:
+
+```text
+Microsoft.KeyVault/vaults/keys/read
+Microsoft.KeyVault/vaults/keys/sign/action
+```
+
+Do not grant the production issuer broad administrative roles or the built-in
+`Key Vault Crypto User` role, which includes operations not required for SSH
+certificate issuance. SSH clients and servers need no Azure permissions.
+
+GitHub Actions can use a user-assigned managed identity with a federated
+credential whose subject is
+`repo:OWNER/REPOSITORY:environment:ENVIRONMENT`. This setup uses Azure Resource
+Manager and does not require Microsoft Graph application-registration access.
+If the tenant custom-role quota prevents creating the read/sign-only role,
+`Key Vault Crypto User` may be used temporarily at the individual test-vault
+scope, but it must be replaced before treating the workflow identity as
+least-privileged production configuration.
+
+## Rotation
+
+Create a new version explicitly:
+
+```sh
+sshca ca rotate \
+  --vault-url "https://example.vault.azure.net" \
+  --name ssh-user-ca
+```
+
+Servers must trust both old and new CA public keys before issuance switches to
+the new version. See [docs/key-rotation.md](docs/key-rotation.md) for the
+required overlap sequence.
+
+## Testing
+
+```sh
+zig build test
+zig build integration-test
+zig build integration-test -Dwith-sshd=true
+```
+
+The credentialed live test is opt-in:
+
+```sh
+export SSHCA_TEST_VAULT_URL="https://example.vault.azure.net"
+export SSHCA_TEST_KEY_NAME="ssh-user-ca"
+export SSHCA_TEST_KEY_VERSION="EXPLICIT_VERSION"
+export SSHCA_TEST_CLOUD="public"
+zig build live-azure-test -Dlive-azure=true
+```
+
+It reads the pre-provisioned test key version, exports its public key, signs
+through Key Vault, validates the certificate with OpenSSH, and completes RSA
+and Ed25519 logins against an isolated, digest-pinned `sshd` container. It
+never creates, rotates, updates, disables, or deletes a key.
+
+## Library
+
+`src/root.zig` exports bounded OpenSSH public-key parsing, PEM parsing,
+certificate serialization, issuance policy, signer interfaces, and the Azure
+Key Vault adapter. The administrative CLI is suitable for setup and manual
+issuance; production systems should expose a separately authenticated service
+that calls the library with a least-privileged workload identity.
+
+## License
+
+MIT. The project retains the original 2025-2026 Dave Curylo attribution in
+[LICENSE](LICENSE).

@@ -1,0 +1,41 @@
+name: Live Azure validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sshca-live-azure
+  cancel-in-progress: false
+
+jobs:
+  keyvault-and-sshd:
+    runs-on: ubuntu-24.04
+    environment: live-azure
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          environment: AzureCloud
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libssl-dev pkg-config
+      - name: Run live Key Vault and SSH login validation
+        env:
+          SSHCA_TEST_VAULT_URL: ${{ vars.SSHCA_TEST_VAULT_URL }}
+          SSHCA_TEST_KEY_NAME: ${{ vars.SSHCA_TEST_KEY_NAME }}
+          SSHCA_TEST_KEY_VERSION: ${{ vars.SSHCA_TEST_KEY_VERSION }}
+          SSHCA_TEST_CLOUD: public
+          SSHCA_AZURE_CREDENTIAL: azure-cli
+        run: zig build live-azure-test -Dlive-azure=true --summary all
