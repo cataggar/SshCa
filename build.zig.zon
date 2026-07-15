@@ -1,0 +1,26 @@
+.{
+    .name = .sshca,
+    .version = "0.1.0",
+    .fingerprint = 0x337b91427863cdb6, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .openssh_portable = .{
+            .url = "git+https://github.com/cataggar/openssh.git#954c03dd1aef8075ee60ea103e4020213de3e591",
+            .hash = "openssh_portable-10.4.0-0sveC-ziggAJOU1VC_p8JcSXYcHjHq6sgkOYUPpqW_tL",
+            .lazy = true,
+        },
+        .azure_sdk = .{
+            .url = "git+https://github.com/cataggar/azure-sdk-for-zig.git#3861c570ef3df55c8c87661a12facf3b6f935190",
+            .hash = "azure_sdk-0.1.0--PMlNS_bCQBHfCI5K7YidNpHA5R79dNeBf1qj4jRQ5ka",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "tests",
+        "docs",
+        "LICENSE",
+        "README.md",
+    },
+}

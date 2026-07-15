@@ -1,0 +1,17 @@
+Type: ssh-ed25519-cert-v01@openssh.com user certificate
+Public key: ED25519-CERT SHA256:aVf56HBz5y/xPRBqU0p/zyBU+TfMj04Ly3TWqFY/F/Q
+Signing CA: RSA SHA256:T0TVuCF/4YLgsabEPWbJjeQ44a2IzvR2EREwzCVASp8 (using rsa-sha2-512)
+Key ID: "openssh-options"
+Serial: 0
+Valid: from 2025-06-13T08:00:00 to 2025-06-13T10:00:00
+Principals:
+        someUser
+Critical Options:
+        force-command /usr/bin/restricted-shell
+        source-address 192.0.2.0/24,2001:db8::/32
+Extensions:
+        permit-X11-forwarding
+        permit-agent-forwarding
+        permit-port-forwarding
+        permit-pty
+        permit-user-rc

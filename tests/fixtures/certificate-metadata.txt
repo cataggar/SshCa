@@ -1,0 +1,7 @@
+Key ID: "testkey"
+Serial: 0
+Valid: from 2025-06-13T08:00:00 to 2025-06-13T10:00:00
+Principals:
+        someUser
+Critical Options: (none)
+Extensions: (none)

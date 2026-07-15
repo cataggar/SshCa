@@ -1,25 +1,43 @@
-name: dotnet build and test
+name: Zig build and test
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, zig16]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
-
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5.0.0
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5.0.0
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: mlugg/setup-zig@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
         with:
-          dotnet-version: 10.0.202
-      - name: Restore dependencies
-        run: dotnet restore
-      - name: Build
-        run: dotnet build -warnaserror --no-restore
-      - name: Test
-        run: dotnet run --no-build --project SshCATests/SshCATests.fsproj --summary
+          version: 0.16.0
+      - name: Check formatting
+        run: zig fmt --check build.zig src tests
+      - name: Run core tests
+        run: zig build test --summary all
+      - name: Build CLI
+        run: zig build --summary all
+
+  openssh-integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: mlugg/setup-zig@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          version: 0.16.0
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libpam0g-dev libssl-dev pkg-config zlib1g-dev
+      - name: Run pinned OpenSSH and sshd tests
+        run: zig build integration-test -Dwith-sshd=true --summary all

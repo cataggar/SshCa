@@ -1,0 +1,15 @@
+Port 22
+ListenAddress 0.0.0.0
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+AuthorizedKeysFile none
+TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitRootLogin no
+UsePAM no
+AllowUsers sshca-test
+StrictModes yes
+LogLevel VERBOSE
