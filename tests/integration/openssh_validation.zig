@@ -277,14 +277,19 @@ fn inspectCertificate(certificate_line: []const u8) ![]u8 {
         .sub_path = "id-cert.pub",
         .data = certificate_line,
     });
+    const certificate_path = try temporary.dir.realPathFileAlloc(
+        std.testing.io,
+        "id-cert.pub",
+        std.testing.allocator,
+    );
+    defer std.testing.allocator.free(certificate_path);
     const result = try std.process.run(std.testing.allocator, std.testing.io, .{
         .argv = &.{
             test_options.ssh_keygen_path,
             "-L",
             "-f",
-            "id-cert.pub",
+            certificate_path,
         },
-        .cwd = .{ .dir = temporary.dir },
         .stdout_limit = .limited(64 * 1024),
         .stderr_limit = .limited(64 * 1024),
     });
