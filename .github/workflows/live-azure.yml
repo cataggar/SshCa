@@ -5,7 +5,8 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+  attestations: read # ghr verifies the Zig release archive's GitHub attestation.
+  id-token: write # azure/login authenticates to Azure with GitHub OIDC.
 
 concurrency:
   group: sshca-live-azure
@@ -17,9 +18,15 @@ jobs:
     environment: live-azure
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - name: Install Zig via ghr
+        uses: cataggar/ghr/actions/install@c4be68b52d67d7acd2a7fe6c1e5f126e1754176e # v0.8.1
+        env:
+          GH_TOKEN: ${{ github.token }}
         with:
-          version: 0.16.0
+          ghr-version: v0.8.1
+          tools: >-
+            cataggar/zig@v0.16.0
+            RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
       - name: Sign in to Azure with OIDC
         uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
         with:
